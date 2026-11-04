@@ -84,7 +84,9 @@ button:focus { outline: none; }
   grid-template-columns: 1fr auto 1fr;
 }
 .bar.titled #to-pad { grid-column: 1; justify-self: start; }
-.bar.titled #edit-toggle { grid-column: 3; justify-self: end; }
+.bar.titled #edit-toggle,
+.bar.titled #to-log { grid-column: 3; justify-self: end; }
+.bar.titled .bar-spacer { grid-column: 1; }
 .bar-title {
   grid-column: 2;
   font-size: 17px;
