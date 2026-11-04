@@ -72,7 +72,6 @@
   var logEl = $('log');
   var scroller = $('scroller');
   var editBtn = $('edit-toggle');
-  var footEl = document.querySelector('.foot');
   var toastEl = $('toast');
   var toastText = $('toast-text');
   var toastUndo = $('toast-undo');
@@ -141,9 +140,16 @@
     input.className = 'note-input';
     input.maxLength = NOTE_MAX;
     input.value = entry.note || '';
-    input.placeholder = 'note';
+    input.name = 'henry-note-' + entry.id;
     input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.setAttribute('autocorrect', 'off');
+    input.setAttribute('autocapitalize', 'off');
+    input.setAttribute('inputmode', 'text');
     input.setAttribute('enterkeyhint', 'done');
+    input.setAttribute('data-lpignore', 'true');   // password managers
+    input.setAttribute('data-1p-ignore', 'true');
+    input.setAttribute('data-form-type', 'other');
     input.setAttribute('aria-label', 'Note');
 
     span.textContent = '';
@@ -219,7 +225,6 @@
     editBtn.hidden = !sorted.length;
     editBtn.textContent = editing ? 'Done' : 'Edit';
     editBtn.classList.toggle('on', editing);
-    footEl.hidden = !sorted.length;
   }
 
   /* ---------------------------------------------------------------
@@ -262,13 +267,35 @@
      release, so everything responds instantly. A click with detail 0
      is a keyboard activation (Enter/Space) and is handled too.
   --------------------------------------------------------------- */
+  // The screen changes on pointerdown, so the rest of that same touch
+  // (pointerup + click) would land on whatever is now under the finger,
+  // e.g. "Edit" sitting where "Log" was. Swallow it.
+  var swallowClicks = false;
+  var swallowTimer = null;
+
+  function endSwallow() {
+    clearTimeout(swallowTimer);
+    swallowTimer = setTimeout(function () { swallowClicks = false; }, 120);
+  }
+  document.addEventListener('pointerup', function () { if (swallowClicks) endSwallow(); }, true);
+  document.addEventListener('pointercancel', function () { if (swallowClicks) endSwallow(); }, true);
+  document.addEventListener('click', function (ev) {
+    if (swallowClicks && ev.detail !== 0) {
+      ev.stopImmediatePropagation();
+      ev.preventDefault();
+    }
+  }, true);
+
   function onPress(target, handler) {
     target.addEventListener('pointerdown', function (ev) {
       if (ev.button !== 0 || ev.isPrimary === false) return;
+      clearTimeout(swallowTimer);
+      swallowClicks = true;
+      swallowTimer = setTimeout(function () { swallowClicks = false; }, 1500); // safety net
       handler(ev);
     });
     target.addEventListener('click', function (ev) {
-      if (ev.detail === 0) handler(ev);
+      if (ev.detail === 0) handler(ev); // keyboard activation
     });
   }
 
@@ -302,10 +329,6 @@
   /* ---------------------------------------------------------------
      Actions
   --------------------------------------------------------------- */
-  function buzz() {
-    try { if (navigator.vibrate) navigator.vibrate(10); } catch (e) {}
-  }
-
   function addEntry(v) {
     var t = Date.now();
     var entry = { id: newId(t), v: v, t: t };
@@ -326,7 +349,6 @@
   function logValue(v) {
     // The view changes synchronously, so a second tap can never log twice.
     if (view !== 'pad') return;
-    buzz();
     var entry = addEntry(v);
     goLog();
     showToast('Logged ' + v, function () {
@@ -374,42 +396,6 @@
     if (ev.target.closest('.note-input')) return; // already editing this note
     var r = ev.target.closest('.entry');
     if (r) startNoteEdit(r);
-  });
-
-  /* ---------------------------------------------------------------
-     Export a copy as CSV (the data only lives on this phone)
-  --------------------------------------------------------------- */
-  function pad2(n) { return n < 10 ? '0' + n : String(n); }
-
-  function csvCell(s) {
-    s = String(s);
-    // Guard against spreadsheet formula injection, then quote.
-    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
-    return '"' + s.replace(/"/g, '""') + '"';
-  }
-
-  $('export').addEventListener('click', function () {
-    commitNote();
-    var rows = entries.slice().sort(function (a, b) { return a.t - b.t; });
-    var lines = ['date,time,mood,note'];
-    rows.forEach(function (e) {
-      var d = new Date(e.t);
-      lines.push(
-        d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + ',' +
-        pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds()) + ',' +
-        e.v + ',' + (e.note ? csvCell(e.note) : '')
-      );
-    });
-    var now = new Date();
-    var name = 'henry-' + now.getFullYear() + '-' + pad2(now.getMonth() + 1) + '-' + pad2(now.getDate()) + '.csv';
-    var url = URL.createObjectURL(new Blob([lines.join('\n') + '\n'], { type: 'text/csv' }));
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
   });
 
   /* ---------------------------------------------------------------
