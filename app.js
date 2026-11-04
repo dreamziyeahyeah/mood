@@ -5,7 +5,8 @@
      Storage: a small JSON list in localStorage, with an in-memory
      fallback so the app still works if storage is blocked.
   --------------------------------------------------------------- */
-  var KEY = 'mood.entries.v1';
+  var KEY = 'mood.entries.v1'; // key kept so existing entries carry over
+  var NOTE_MAX = 100;
   var memoryOnly = null; // raw string used only when localStorage is unavailable
 
   function readRaw() {
@@ -26,7 +27,8 @@
     return e && typeof e === 'object' &&
       typeof e.id === 'string' &&
       Number.isInteger(e.v) && e.v >= 1 && e.v <= 10 &&
-      typeof e.t === 'number' && isFinite(e.t);
+      typeof e.t === 'number' && isFinite(e.t) &&
+      (e.note === undefined || typeof e.note === 'string');
   }
 
   function load() {
@@ -55,6 +57,11 @@
     return t.toString(36) + Math.random().toString(36).slice(2, 7);
   }
 
+  function findEntry(id) {
+    for (var i = 0; i < entries.length; i++) if (entries[i].id === id) return entries[i];
+    return null;
+  }
+
   /* ---------------------------------------------------------------
      Elements
   --------------------------------------------------------------- */
@@ -72,8 +79,6 @@
 
   var view = 'pad';
   var editing = false;
-  var locked = false;
-  var freshId = null;
 
   /* ---------------------------------------------------------------
      Formatting
@@ -106,6 +111,57 @@
   }
 
   /* ---------------------------------------------------------------
+     Notes: tap a row, type, press Enter / tap away to save
+  --------------------------------------------------------------- */
+  var noteEdit = null; // { id, span, input, cancel }
+
+  function commitNote() {
+    var ne = noteEdit;
+    if (!ne) return;
+    noteEdit = null; // set first: removing the input fires blur again
+    var entry = findEntry(ne.id);
+    if (entry && !ne.cancel) {
+      var val = ne.input.value.replace(/\s+/g, ' ').trim().slice(0, NOTE_MAX);
+      if (val !== (entry.note || '')) {
+        if (val) entry.note = val; else delete entry.note;
+        save();
+      }
+    }
+    ne.span.textContent = (entry && entry.note) || '';
+  }
+
+  function startNoteEdit(row) {
+    commitNote();
+    var entry = findEntry(row.dataset.id);
+    var span = row.querySelector('.entry-note');
+    if (!entry || !span) return;
+
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'note-input';
+    input.maxLength = NOTE_MAX;
+    input.value = entry.note || '';
+    input.placeholder = 'note';
+    input.autocomplete = 'off';
+    input.setAttribute('enterkeyhint', 'done');
+    input.setAttribute('aria-label', 'Note');
+
+    span.textContent = '';
+    span.appendChild(input);
+    noteEdit = { id: entry.id, span: span, input: input, cancel: false };
+
+    input.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+      else if (ev.key === 'Escape') { noteEdit && (noteEdit.cancel = true); input.blur(); }
+    });
+    input.addEventListener('blur', commitNote);
+
+    input.focus();
+    var n = input.value.length;
+    try { input.setSelectionRange(n, n); } catch (e) {}
+  }
+
+  /* ---------------------------------------------------------------
      Render the log
   --------------------------------------------------------------- */
   function el(tag, cls, text) {
@@ -116,6 +172,7 @@
   }
 
   function renderLog() {
+    commitNote();
     var sorted = entries.slice().sort(function (a, b) { return b.t - a.t; });
     var frag = document.createDocumentFragment();
 
@@ -142,12 +199,13 @@
 
         for (var j = 0; j < group.length; j++) {
           var e = group[j];
-          var row = el('div', 'entry' + (e.id === freshId ? ' fresh' : ''));
+          var row = el('div', 'entry');
+          row.dataset.id = e.id;
           row.appendChild(el('span', 'entry-val', String(e.v)));
           row.appendChild(el('span', 'entry-time', timeFmt.format(new Date(e.t))));
+          row.appendChild(el('span', 'entry-note', e.note || ''));
           var del = el('button', 'entry-del', 'Delete');
           del.type = 'button';
-          del.dataset.id = e.id;
           del.setAttribute('aria-label', 'Delete ' + e.v + ' at ' + timeFmt.format(new Date(e.t)));
           row.appendChild(del);
           frag.appendChild(row);
@@ -165,40 +223,33 @@
   }
 
   /* ---------------------------------------------------------------
-     Views and history (so the Android back button behaves)
+     Views and history (so the Android back button behaves).
+     Switching is a plain show/hide: instant, no animation.
   --------------------------------------------------------------- */
   function showView(next) {
+    commitNote();
     view = next;
     var isPad = next === 'pad';
     viewPad.hidden = !isPad;
     viewLog.hidden = isPad;
-    var active = isPad ? viewPad : viewLog;
-    active.classList.remove('enter');
-    void active.offsetWidth; // restart the animation
-    active.classList.add('enter');
 
     if (isPad) {
       editing = false;
-      locked = false;
-      pad.classList.remove('locked');
-      clearHits();
     } else {
       renderLog();
       scroller.scrollTop = 0;
     }
   }
 
-  function goLog(withFresh) {
-    freshId = withFresh || null;
+  function goLog() {
     history.pushState({ v: 'log' }, '', '#log');
     showView('log');
-    freshId = null;
   }
 
   function goPad() {
     // The log is always opened from the pad, so stepping back lands on it.
+    showView('pad'); // switch immediately; the history step below is bookkeeping
     if (history.state && history.state.v === 'log') history.back();
-    else showView('pad');
   }
 
   window.addEventListener('popstate', function () {
@@ -207,7 +258,22 @@
   });
 
   /* ---------------------------------------------------------------
-     Toast with undo
+     Press handling: act on the press itself (pointerdown), not on
+     release, so everything responds instantly. A click with detail 0
+     is a keyboard activation (Enter/Space) and is handled too.
+  --------------------------------------------------------------- */
+  function onPress(target, handler) {
+    target.addEventListener('pointerdown', function (ev) {
+      if (ev.button !== 0 || ev.isPrimary === false) return;
+      handler(ev);
+    });
+    target.addEventListener('click', function (ev) {
+      if (ev.detail === 0) handler(ev);
+    });
+  }
+
+  /* ---------------------------------------------------------------
+     Toast with undo (appears and disappears instantly)
   --------------------------------------------------------------- */
   var toastTimer = null;
   var toastAction = null;
@@ -218,10 +284,6 @@
     toastText.textContent = text;
     toastUndo.hidden = !undoFn;
     toastEl.hidden = false;
-    // restart the entrance animation
-    toastEl.style.animation = 'none';
-    void toastEl.offsetWidth;
-    toastEl.style.animation = '';
     toastTimer = setTimeout(hideToast, undoFn ? 5000 : 3000);
   }
 
@@ -231,7 +293,7 @@
     toastAction = null;
   }
 
-  toastUndo.addEventListener('click', function () {
+  onPress(toastUndo, function () {
     var fn = toastAction;
     hideToast();
     if (fn) fn();
@@ -241,7 +303,7 @@
      Actions
   --------------------------------------------------------------- */
   function buzz() {
-    try { if (navigator.vibrate) navigator.vibrate(12); } catch (e) {}
+    try { if (navigator.vibrate) navigator.vibrate(10); } catch (e) {}
   }
 
   function addEntry(v) {
@@ -261,38 +323,31 @@
     return removed;
   }
 
-  function clearHits() {
-    var hits = pad.querySelectorAll('.hit');
-    for (var i = 0; i < hits.length; i++) hits[i].classList.remove('hit');
+  function logValue(v) {
+    // The view changes synchronously, so a second tap can never log twice.
+    if (view !== 'pad') return;
+    buzz();
+    var entry = addEntry(v);
+    goLog();
+    showToast('Logged ' + v, function () {
+      removeEntry(entry.id);
+      if (view === 'log') renderLog();
+    });
   }
 
-  pad.addEventListener('click', function (ev) {
-    var key = ev.target.closest('.key');
-    if (!key || locked || view !== 'pad') return;
+  onPress(pad, function (ev) {
+    var key = ev.target.closest && ev.target.closest('.key');
+    if (!key) return;
     var v = parseInt(key.dataset.v, 10);
-    if (!(v >= 1 && v <= 10)) return;
-
-    locked = true; // ignore any further taps (double-taps, second finger)
-    pad.classList.add('locked');
-    key.classList.add('hit');
-    buzz();
-
-    var entry = addEntry(v);
-    setTimeout(function () {
-      if (view !== 'pad') return;
-      goLog(entry.id);
-      showToast('Logged ' + v, function () {
-        removeEntry(entry.id);
-        if (view === 'log') renderLog();
-      });
-    }, 170);
+    if (v >= 1 && v <= 10) logValue(v);
   });
 
-  $('to-log').addEventListener('click', function () {
-    if (view === 'pad' && !locked) goLog(null);
+  onPress($('to-log'), function () {
+    if (view === 'pad') goLog();
   });
 
-  $('to-pad').addEventListener('click', function () {
+  onPress($('to-pad'), function () {
+    if (view !== 'log') return;
     hideToast();
     goPad();
   });
@@ -304,15 +359,21 @@
 
   logEl.addEventListener('click', function (ev) {
     var btn = ev.target.closest('.entry-del');
-    if (!btn) return;
-    var removed = removeEntry(btn.dataset.id);
-    if (!removed) return;
-    renderLog();
-    showToast('Deleted ' + removed.v, function () {
-      entries.push(removed);
-      save();
-      if (view === 'log') renderLog();
-    });
+    if (btn) {
+      var row = btn.closest('.entry');
+      var removed = row && removeEntry(row.dataset.id);
+      if (!removed) return;
+      renderLog();
+      showToast('Deleted ' + removed.v, function () {
+        entries.push(removed);
+        save();
+        if (view === 'log') renderLog();
+      });
+      return;
+    }
+    if (ev.target.closest('.note-input')) return; // already editing this note
+    var r = ev.target.closest('.entry');
+    if (r) startNoteEdit(r);
   });
 
   /* ---------------------------------------------------------------
@@ -320,18 +381,27 @@
   --------------------------------------------------------------- */
   function pad2(n) { return n < 10 ? '0' + n : String(n); }
 
+  function csvCell(s) {
+    s = String(s);
+    // Guard against spreadsheet formula injection, then quote.
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+
   $('export').addEventListener('click', function () {
+    commitNote();
     var rows = entries.slice().sort(function (a, b) { return a.t - b.t; });
-    var lines = ['date,time,mood'];
+    var lines = ['date,time,mood,note'];
     rows.forEach(function (e) {
       var d = new Date(e.t);
       lines.push(
         d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + ',' +
-        pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds()) + ',' + e.v
+        pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds()) + ',' +
+        e.v + ',' + (e.note ? csvCell(e.note) : '')
       );
     });
     var now = new Date();
-    var name = 'mood-' + now.getFullYear() + '-' + pad2(now.getMonth() + 1) + '-' + pad2(now.getDate()) + '.csv';
+    var name = 'henry-' + now.getFullYear() + '-' + pad2(now.getMonth() + 1) + '-' + pad2(now.getDate()) + '.csv';
     var url = URL.createObjectURL(new Blob([lines.join('\n') + '\n'], { type: 'text/csv' }));
     var a = document.createElement('a');
     a.href = url;
@@ -348,6 +418,7 @@
   var hiddenAt = 0;
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'hidden') {
+      commitNote(); // never lose a half-typed note
       hiddenAt = Date.now();
       return;
     }

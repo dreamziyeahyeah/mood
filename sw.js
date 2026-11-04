@@ -1,5 +1,5 @@
 // Offline cache for the app shell. Bump VERSION whenever any file changes.
-var VERSION = 'mood-v2';
+var VERSION = 'henry-v3';
 var FILES = [
   './',
   'index.html',
