@@ -253,7 +253,6 @@
     logEl.classList.toggle('editing', editing);
     editBtn.hidden = !sorted.length;
     editBtn.textContent = editing ? 'Done' : 'Edit';
-    editBtn.classList.toggle('on', editing);
   }
 
   /* ---------------------------------------------------------------

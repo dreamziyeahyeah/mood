@@ -1,5 +1,5 @@
 // Offline cache for the app shell. Bump VERSION whenever any file changes.
-var VERSION = 'henry-v6';
+var VERSION = 'henry-v7';
 var FILES = [
   './',
   'index.html',
