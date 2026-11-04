@@ -1,16 +1,16 @@
-"""Generates the app icons (ruled notepad paper with a single ink dot). No dependencies."""
+"""Generates the app icons (dark ruled notebook page with a single muted dot). No dependencies."""
 import os, struct, zlib
 
-PAPER = (243, 238, 227)
-RULE = (214, 205, 184)
-MARGIN = (216, 185, 176)
-INK = (43, 41, 37)
+PAPER = (31, 29, 26)      # same as the app's dark background, so the launch splash blends in
+RULE = (44, 42, 38)
+MARGIN = (62, 49, 45)
+INK = (143, 137, 122)
 
 def png(path, size, scale):
     # scale < 1 shrinks the artwork toward the centre (for the maskable safe zone)
     rows = []
     cx = cy = size / 2
-    r = size * 0.17 * scale
+    r = size * 0.13 * scale
     lines = [size * (0.5 + k * 0.14 * scale) for k in (-3, -2, -1, 0, 1, 2, 3)]
     margin_x = size * (0.5 - 0.30 * scale)
     lw = max(1.0, size * 0.006)

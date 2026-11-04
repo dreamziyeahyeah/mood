@@ -227,7 +227,7 @@ button:focus { outline: none; }
   font-style: italic;
   /* same look as the saved note: nothing changes when you tap in */
   color: var(--ink-soft);
-  caret-color: var(--ink);
+  caret-color: transparent; /* no blinking cursor */
   white-space: nowrap;
   overflow: hidden;
   background: transparent;
