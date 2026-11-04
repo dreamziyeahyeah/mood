@@ -117,10 +117,10 @@
   function commitNote() {
     var ne = noteEdit;
     if (!ne) return;
-    noteEdit = null; // set first: removing the input fires blur again
+    noteEdit = null; // set first: removing the editor fires blur again
     var entry = findEntry(ne.id);
     if (entry && !ne.cancel) {
-      var val = ne.input.value.replace(/\s+/g, ' ').trim().slice(0, NOTE_MAX);
+      var val = ne.input.textContent.replace(/\s+/g, ' ').trim().slice(0, NOTE_MAX);
       if (val !== (entry.note || '')) {
         if (val) entry.note = val; else delete entry.note;
         save();
@@ -129,42 +129,71 @@
     ne.span.textContent = (entry && entry.note) || '';
   }
 
+  function caretToEnd(node) {
+    try {
+      var range = document.createRange();
+      range.selectNodeContents(node);
+      range.collapse(false);
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch (e) {}
+  }
+
+  // The note box is a contenteditable element rather than an <input>:
+  // Android only shows its autofill toolbar (passwords / cards / addresses)
+  // above the keyboard for real form fields.
   function startNoteEdit(row) {
     commitNote();
     var entry = findEntry(row.dataset.id);
     var span = row.querySelector('.entry-note');
     if (!entry || !span) return;
 
-    var input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'note-input';
-    input.maxLength = NOTE_MAX;
-    input.value = entry.note || '';
-    input.name = 'henry-note-' + entry.id;
-    input.autocomplete = 'off';
-    input.spellcheck = false;
-    input.setAttribute('autocorrect', 'off');
-    input.setAttribute('autocapitalize', 'off');
-    input.setAttribute('inputmode', 'text');
-    input.setAttribute('enterkeyhint', 'done');
-    input.setAttribute('data-lpignore', 'true');   // password managers
-    input.setAttribute('data-1p-ignore', 'true');
-    input.setAttribute('data-form-type', 'other');
-    input.setAttribute('aria-label', 'Note');
+    var box = document.createElement('div');
+    box.className = 'note-input';
+    box.setAttribute('contenteditable', 'plaintext-only');
+    if (box.contentEditable !== 'plaintext-only') box.setAttribute('contenteditable', 'true');
+    box.setAttribute('role', 'textbox');
+    box.setAttribute('aria-label', 'Note');
+    box.setAttribute('spellcheck', 'false');
+    box.setAttribute('autocorrect', 'off');
+    box.setAttribute('autocapitalize', 'off');
+    box.setAttribute('enterkeyhint', 'done');
+    box.textContent = entry.note || '';
 
     span.textContent = '';
-    span.appendChild(input);
-    noteEdit = { id: entry.id, span: span, input: input, cancel: false };
+    span.appendChild(box);
+    noteEdit = { id: entry.id, span: span, input: box, cancel: false };
 
-    input.addEventListener('keydown', function (ev) {
-      if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
-      else if (ev.key === 'Escape') { noteEdit && (noteEdit.cancel = true); input.blur(); }
+    box.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); box.blur(); }
+      else if (ev.key === 'Escape') { if (noteEdit) noteEdit.cancel = true; box.blur(); }
     });
-    input.addEventListener('blur', commitNote);
+    // Virtual keyboards often send Enter as an input event, not a keydown.
+    box.addEventListener('beforeinput', function (ev) {
+      if (ev.inputType === 'insertParagraph' || ev.inputType === 'insertLineBreak') {
+        ev.preventDefault();
+        box.blur();
+      } else if (ev.inputType === 'insertFromDrop') {
+        ev.preventDefault();
+      }
+    });
+    box.addEventListener('paste', function (ev) {
+      ev.preventDefault();
+      var text = (ev.clipboardData && ev.clipboardData.getData('text/plain')) || '';
+      text = text.replace(/\s+/g, ' ');
+      if (text) document.execCommand('insertText', false, text);
+    });
+    box.addEventListener('input', function () {
+      if (box.textContent.length > NOTE_MAX) {
+        box.textContent = box.textContent.slice(0, NOTE_MAX);
+        caretToEnd(box);
+      }
+    });
+    box.addEventListener('blur', commitNote);
 
-    input.focus();
-    var n = input.value.length;
-    try { input.setSelectionRange(n, n); } catch (e) {}
+    box.focus();
+    caretToEnd(box);
   }
 
   /* ---------------------------------------------------------------
